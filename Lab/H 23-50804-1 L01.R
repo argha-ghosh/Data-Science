@@ -108,7 +108,9 @@ print(mat[, 2])  # Output: 4 5 6
 
 # Matrix Arithmetic
 mat1 <- matrix(1:4, nrow = 2)
+print(mat1)
 mat2 <- matrix(5:8, nrow = 2)
+print(mat2)
 
 # Matrix addition
 sum_mat <- mat1 + mat2
@@ -129,6 +131,7 @@ print(t_mat)
 
 # Inverse of a matrix (for square matrices)
 square_mat <- matrix(c(2, 3, 1, 4), nrow = 2)
+print(square_mat)
 inv_mat <- solve(square_mat)
 print(inv_mat)
 
@@ -138,16 +141,17 @@ print(arr)
 
 # Accessing Elements in an Array
 # Create a 3x3x2 array
-arr <- array(1:18, dim = c(3, 3, 2))
+arr5 <- array(1:18, dim = c(3, 3, 2))
+print(arr5)
 
 # Access element at [2nd row, 3rd column, 1st layer]
-print(arr[2, 3, 1])  # Output: 8
+print(arr5[2, 3, 1])  # Output: 8
 
 # Access entire 2nd row from Layer 1
-print(arr[2, , 1])
+print(arr5[2, , 1])
 
 # Access entire 3rd column from Layer 2
-print(arr[, 3, 2])
+print(arr5[, 3, 2])
 
 #Performing Operations on Arrays
 # Creating two 3x3x2 arrays

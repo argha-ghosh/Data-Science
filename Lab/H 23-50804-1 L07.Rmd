@@ -1,0 +1,380 @@
+---
+title: "Regression and Classification on FIFA WC 2022 Dataset"
+author: "Argha Ghosh"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+
+# ============================================================
+# GLOBAL SETTINGS
+# ============================================================
+
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+set.seed(42)
+
+# ============================================================
+# PACKAGE MANAGEMENT
+# ============================================================
+
+packages <- c("tidyverse", "ggplot2", "corrplot",
+              "skimr", "DataExplorer", "caret",
+              "e1071", "rpart", "rpart.plot")
+
+not_installed <- packages[!(packages %in% rownames(installed.packages()))]
+if (length(not_installed) > 0) {
+  install.packages(not_installed, repos = "https://cran.rstudio.com/")
+}
+
+# ============================================================
+# LOAD LIBRARIES
+# ============================================================
+
+library(tidyverse)    # Data manipulation and transformation
+library(ggplot2)      # Data visualization
+library(corrplot)     # Correlation matrix visualization
+library(skimr)        # Extended summary statistics
+library(DataExplorer) # Automated EDA and missing value plots
+library(caret)        # Machine learning and model training
+library(e1071)        # Support vector machines and statistics
+library(rpart)        # Decision tree modeling
+library(rpart.plot)   # Decision tree visualization
+
+```
+
+---
+
+## 📌 1. Load Data
+
+```{r load-data}
+
+# ============================================================
+# DATA LOADING
+# Dataset  : FIFA World Cup 2022 Players Statistics
+# Source   : Google Drive (shared via public link)
+# Method   : download.file() to temp file — fully reproducible
+# ============================================================
+
+# Step 1: Define file ID and construct Google Drive download URL
+file_id   <- "1ZQeE33xnHGuInF1vBkVbm0tZ1on_cAIA"
+url       <- paste0("https://drive.google.com/uc?export=download&id=", file_id)
+
+# Step 2: Download to a temporary file then read — more reliable than direct URL
+temp_file <- tempfile(fileext = ".csv")
+download.file(url, destfile = temp_file, mode = "wb", quiet = TRUE)
+data      <- read.csv(temp_file, stringsAsFactors = FALSE)
+
+# Step 3: Clean column names — remove leading/trailing spaces
+colnames(data) <- trimws(colnames(data))
+
+# Step 4: Convert columns that load as character to numeric
+data$Appearances                 <- as.numeric(trimws(data$Appearances))
+data$FIFA.Ranking                <- as.numeric(trimws(data$FIFA.Ranking))
+data$National.Team.Jersey.Number <- as.numeric(trimws(data$National.Team.Jersey.Number))
+
+# Step 5: Convert string-numeric columns — replace "-" and "N.A" with NA
+clean_num <- function(x) {
+  suppressWarnings(as.numeric(ifelse(trimws(x) %in% c("-", "N.A", "N.A.", ""), NA, trimws(x))))
+}
+
+data$Goals.Scored           <- clean_num(data$Goals.Scored)
+data$Assists.Provided       <- clean_num(data$Assists.Provided)
+data$Dribbles.per.90        <- clean_num(data$Dribbles.per.90)
+data$Interceptions.per.90   <- clean_num(data$Interceptions.per.90)
+data$Tackles.per.90         <- clean_num(data$Tackles.per.90)
+data$Total.Duels.Won.per.90 <- clean_num(data$Total.Duels.Won.per.90)
+
+# Step 6: Preview the dataset
+cat("Dataset loaded successfully!\n")
+cat("Rows:", nrow(data), "| Columns:", ncol(data), "\n\n")
+head(data)
+
+```
+
+## 📌 2. Exploratory Data Analysis (EDA)
+
+### Summary
+
+```{r eda-summary}
+
+# ============================================================
+# SUMMARY STATISTICS
+# Provides overview of distributions and ranges
+# ============================================================
+
+summary(data)
+
+```
+
+
+### Distribution
+
+```{r eda-distribution}
+
+# ============================================================
+# DISTRIBUTION OF APPEARANCES
+# Shows how many matches players have played
+# ============================================================
+
+ggplot(data, aes(x = Appearances)) +
+  geom_histogram(bins = 30, fill = "steelblue", alpha = 0.7) +
+  theme_minimal() +
+  labs(
+    title = "Distribution of Player Appearances",
+    x     = "Appearances",
+    y     = "Count"
+  )
+
+```
+
+
+### Pair Plot
+
+```{r eda-pairplot}
+
+# ============================================================
+# PAIR PLOT OF NUMERICAL FEATURES
+# Shows relationships between key numeric columns
+# ============================================================
+
+pair_cols <- data %>%
+  select(FIFA.Ranking, Appearances,
+         Goals.Scored, Assists.Provided, Dribbles.per.90) %>%
+  na.omit()
+
+pairs(pair_cols, main = "Pair Plot of Key Numerical Features")
+
+```
+
+
+### Correlation
+
+```{r eda-correlation}
+
+# ============================================================
+# CORRELATION MATRIX
+# Detects linear relationships between numerical features
+# ============================================================
+
+num_data   <- data %>% select_if(is.numeric)
+cor_matrix <- cor(num_data, use = "complete.obs")
+print(round(cor_matrix, 3))
+
+```
+
+
+## 📌 3. Data Preprocessing
+
+```{r preprocessing}
+
+# ============================================================
+# DATA PREPROCESSING
+# Step 1: Check missing values
+# Step 2: Fill missing values
+# Step 3: Scale numeric features
+# ============================================================
+
+# --- Step 1: Check Missing Values ---
+cat("=== Missing Values Before Handling ===\n")
+print(colSums(is.na(data)))
+
+# --- Step 2: Fill Missing Values ---
+
+# Helper function to calculate mode for categorical columns
+get_mode <- function(x) {
+  ux <- unique(x[!is.na(x)])
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Fill numerical columns with median (robust to outliers)
+num_cols_names <- names(data)[sapply(data, is.numeric)]
+for (col in num_cols_names) {
+  if (any(is.na(data[[col]]))) {
+    data[[col]][is.na(data[[col]])] <- median(data[[col]], na.rm = TRUE)
+  }
+}
+
+# Fill categorical columns with mode (most frequent value)
+cat_cols_names <- names(data)[sapply(data, function(x) is.character(x) | is.factor(x))]
+for (col in cat_cols_names) {
+  if (any(is.na(data[[col]]))) {
+    data[[col]][is.na(data[[col]])] <- get_mode(data[[col]])
+  }
+}
+
+cat("\n=== Missing Values After Handling ===\n")
+cat("Total missing values remaining:", sum(is.na(data)), "\n")
+
+# --- Step 3: Scale Numerical Features ---
+num_cols_data   <- data %>% select_if(is.numeric)
+scaled_features <- scale(num_cols_data)
+
+# Replace original numeric columns with scaled values
+data_scaled <- data
+data_scaled[, names(num_cols_data)] <- scaled_features
+
+# Check structure after scaling
+str(data_scaled)
+
+```
+
+
+## 📌 4. Train-Test Split
+
+```{r train-test-split}
+
+# ============================================================
+# TRAIN-TEST SPLIT FOR REGRESSION
+# 80% training, 20% testing
+# Target: Goals Scored (numerical prediction)
+# ============================================================
+
+trainIndex <- createDataPartition(data_scaled$Goals.Scored,
+                                  p = 0.8, list = FALSE)
+
+train_data <- data_scaled[trainIndex, ]
+test_data  <- data_scaled[-trainIndex, ]
+
+cat("Training set size :", nrow(train_data), "\n")
+cat("Testing set size  :", nrow(test_data),  "\n")
+
+```
+
+---
+
+## 📈 5. Linear Regression
+
+```{r linear-regression}
+
+# ============================================================
+# LINEAR REGRESSION
+# Target   : Goals Scored
+# Features : FIFA Ranking, Appearances, Assists Provided,
+#            Dribbles per 90, Tackles per 90
+# ============================================================
+
+lm_model <- lm(Goals.Scored ~ FIFA.Ranking + Appearances +
+                 Assists.Provided + Dribbles.per.90 + Tackles.per.90,
+               data = train_data)
+
+summary(lm_model)
+
+```
+
+
+```{r regression-evaluation}
+
+# ============================================================
+# REGRESSION EVALUATION METRICS
+# RMSE — Root Mean Square Error (lower = better)
+# MAE  — Mean Absolute Error   (lower = better)
+# R²   — Proportion of variance explained (higher = better)
+# ============================================================
+
+pred_lm <- predict(lm_model, newdata = test_data)
+rmse    <- sqrt(mean((test_data$Goals.Scored - pred_lm)^2, na.rm = TRUE))
+mae     <- mean(abs(test_data$Goals.Scored   - pred_lm),  na.rm = TRUE)
+r2      <- cor(test_data$Goals.Scored, pred_lm, use = "complete.obs")^2
+
+cat("=== Regression Evaluation Metrics ===\n")
+cat("RMSE :", round(rmse, 4), "\n")
+cat("MAE  :", round(mae,  4), "\n")
+cat("R²   :", round(r2,   4), "\n")
+
+```
+
+
+```{r regression-plot}
+
+# ============================================================
+# ACTUAL vs PREDICTED PLOT
+# Points close to the red line = accurate predictions
+# ============================================================
+
+plot(test_data$Goals.Scored, pred_lm,
+     xlab = "Actual Goals Scored",
+     ylab = "Predicted Goals Scored",
+     main = "Actual vs Predicted — Linear Regression",
+     col  = "steelblue",
+     pch  = 16)
+abline(0, 1, col = "red", lwd = 2)
+
+```
+
+---
+
+## 🌳 6. Decision Tree Classification
+
+```{r decision-tree}
+
+# ============================================================
+# DECISION TREE CLASSIFICATION
+# Target   : Position (GK, DF, MF, FW)
+# Features : Key numerical performance features
+# Note     : Using original unscaled data — trees don't need scaling
+# ============================================================
+
+# Prepare classification dataset with Position as factor
+data_cls          <- data
+data_cls$Position <- as.factor(data_cls$Position)
+
+# Classification train-test split (stratified by Position)
+trainIndex2 <- createDataPartition(data_cls$Position,
+                                   p = 0.8, list = FALSE)
+
+train_cls <- data_cls[trainIndex2, ]
+test_cls  <- data_cls[-trainIndex2, ]
+
+cat("Training set size :", nrow(train_cls), "\n")
+cat("Testing set size  :", nrow(test_cls),  "\n\n")
+
+# Build decision tree model
+dt_model <- rpart(Position ~ FIFA.Ranking + Appearances +
+                    Goals.Scored + Assists.Provided +
+                    Dribbles.per.90 + Tackles.per.90,
+                  data   = train_cls,
+                  method = "class")
+
+# Visualize the decision tree
+rpart.plot(dt_model, main = "Decision Tree — Player Position Classification")
+
+```
+
+
+### Feature Importance
+
+```{r feature-importance}
+
+# ============================================================
+# FEATURE IMPORTANCE
+# Shows which features the tree relies on most
+# Higher value = more important for classification
+# ============================================================
+
+cat("=== Feature Importance ===\n")
+print(dt_model$variable.importance)
+
+```
+
+---
+
+```{r classification-evaluation}
+
+# ============================================================
+# CLASSIFICATION EVALUATION
+# Confusion Matrix — correct vs incorrect predictions
+# Accuracy, Precision, Recall, F1-score per class
+# ============================================================
+
+pred_dt <- predict(dt_model, test_cls, type = "class")
+confusionMatrix(pred_dt, test_cls$Position)
+
+```
+
+
