@@ -1,0 +1,1964 @@
+---
+title: "H-G05-Final Project"
+author: "Murshed Ahmed | Mst. Sabrina Sultana Hasi | Samiul Islam | Argha Ghosh"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    theme: flatly
+    code_folding: show
+---
+
+```{r setup, include=FALSE}
+
+# ============================================================
+# GLOBAL SETTINGS
+# ============================================================
+
+# Set default chunk behaviour for the entire document
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+# Set seed for full reproducibility
+set.seed(42)
+
+# ============================================================
+# PACKAGE MANAGEMENT
+# Automatically installs any missing packages
+# No manual installation required on any machine
+# ============================================================
+
+packages <- c("tidyverse", "ggplot2", "corrplot",
+              "skimr", "caret", "e1071", "gridExtra",
+              "randomForest")
+
+not_installed <- packages[!(packages %in% rownames(installed.packages()))]
+if (length(not_installed) > 0) {
+  install.packages(not_installed, repos = "https://cran.rstudio.com/")
+}
+
+# ============================================================
+# LOAD LIBRARIES
+# ============================================================
+
+library(tidyverse)    # Data manipulation and transformation
+library(ggplot2)      # Data visualization
+library(corrplot)     # Correlation heatmap
+library(skimr)        # Extended summary statistics
+library(caret)        # Machine learning utilities
+library(e1071)        # Skewness calculations
+library(gridExtra)    # Arrange multiple plots on one page
+library(randomForest) # Used to train the Random Forest model for predicting player Position
+
+```
+
+---
+
+# Part A: Data Collection
+
+```{r part-a-data-collection}
+
+# ============================================================
+# PART A: DATA COLLECTION
+# ============================================================
+# Dataset   : FIFA World Cup 2022 Players Statistics
+# Original Source : Kaggle / Open Dataset Repository
+# Original Link   : ADD YOUR ORIGINAL DATASET LINK HERE
+# Loading Source  : Google Drive (publicly shared direct download link)
+# Rows      : 814 players
+# Columns   : 18 features
+# Method    : Loaded via URL — no local paths used
+#             Runs on any machine without modification
+# ============================================================
+
+# Step 1: Construct the direct Google Drive download URL
+file_id <- "1ZQeE33xnHGuInF1vBkVbm0tZ1on_cAIA"
+url     <- paste0("https://drive.google.com/uc?export=download&id=", file_id)
+
+# Step 2: Download file to a temporary location then read it
+#         Using tempfile() ensures no local path is hardcoded
+temp_file <- tempfile(fileext = ".csv")
+download.file(url, destfile = temp_file, mode = "wb", quiet = TRUE)
+df        <- read.csv(temp_file, stringsAsFactors = FALSE)
+
+# Step 3: Remove leading/trailing spaces from all column names
+colnames(df) <- trimws(colnames(df))
+
+# -------------------------------------------------------
+# Step 4: Clean and convert all columns to correct types
+# Many numeric columns contain "-" or "N.A" instead of NA
+# This helper function handles all such cases
+# -------------------------------------------------------
+
+clean_numeric <- function(x) {
+  x <- trimws(x)                               # Remove whitespace
+  x[x %in% c("-", "N.A", "N.A.", "NA", "")] <- NA  # Replace placeholders
+  x <- gsub("%", "", x)                        # Remove % symbol if present
+  suppressWarnings(as.numeric(x))              # Convert to numeric
+}
+
+clean_character <- function(x) {
+  x <- trimws(x)
+  x[x %in% c("-", "N.A", "N.A.", "NA", "")] <- NA
+  x
+}
+
+# Apply numeric conversion
+df$FIFA.Ranking                <- clean_numeric(df$FIFA.Ranking)
+df$National.Team.Jersey.Number <- clean_numeric(df$National.Team.Jersey.Number)
+df$Appearances                 <- clean_numeric(df$Appearances)
+df$Goals.Scored                <- clean_numeric(df$Goals.Scored)
+df$Assists.Provided            <- clean_numeric(df$Assists.Provided)
+df$Dribbles.per.90             <- clean_numeric(df$Dribbles.per.90)
+df$Interceptions.per.90        <- clean_numeric(df$Interceptions.per.90)
+df$Tackles.per.90              <- clean_numeric(df$Tackles.per.90)
+df$Total.Duels.Won.per.90      <- clean_numeric(df$Total.Duels.Won.per.90)
+df$Save.Percentage             <- clean_numeric(df$Save.Percentage)
+df$Clean.Sheets                <- clean_numeric(df$Clean.Sheets)
+
+# Apply character cleaning
+df$National.Team.Kit.Sponsor  <- clean_character(df$National.Team.Kit.Sponsor)
+df$Club                       <- clean_character(df$Club)
+df$Brand.Sponsor.Brand.Used   <- clean_character(df$Brand.Sponsor.Brand.Used)
+
+# Step 5: Confirm the dataset loaded correctly
+#cat("=============================================\n")
+cat("DATASET LOADED SUCCESSFULLY\n")
+
+cat("Dataset  : FIFA World Cup 2022 Players Stats")
+cat("Source   : Google Drive (public link)")
+cat("Rows     :", nrow(df), "\n")
+cat("Columns  :", ncol(df), "\n")
+
+# Step 6: Display all column names with index numbers
+cat("Column Names")
+for (i in seq_along(colnames(df))) {
+  cat(sprintf("%2d. %s\n", i, colnames(df)[i]))
+}
+
+# Step 7: Preview the first 6 rows
+cat("First 6 Rows")
+head(df)
+
+```
+
+> **Description:** The FIFA World Cup 2022 Players Statistics dataset contains performance data for 814 players from 32 national teams. It includes numerical features such as Goals Scored, Assists Provided, Appearances, and Tackles per 90, as well as categorical features such as Position, Nationality, Club, and Brand Sponsor.
+
+---
+
+# Part B: Data Exploration (EDA)
+
+## B.1 — Dataset Shape, Types & Summary Statistics
+
+```{r b1-shape-types}
+
+# ============================================================
+# B.1 DATASET SHAPE AND DATA TYPES
+# Shows total rows, columns and the type of each feature
+# ============================================================
+
+cat("DATASET SHAPE")
+cat("Total Rows    :", nrow(df), "\n")
+cat("Total Columns :", ncol(df), "\n\n")
+
+cat("=== DATA TYPES OF EACH COLUMN ===\n")
+for (col in colnames(df)) {
+  cat(sprintf("%-35s : %s\n", col, class(df[[col]])))
+}
+
+```
+
+```{r b1-summary}
+
+# ============================================================
+# SUMMARY STATISTICS
+# Min, Max, Mean, Median for numerical features
+# Length and class for categorical features
+# ============================================================
+
+cat("SUMMARY STATISTICS")
+summary(df)
+
+```
+
+> **Interpretation:** Most performance stats (Goals, Assists, Dribbles) have very low medians close to zero, indicating that the majority of players are defenders and midfielders with limited attacking output. The mean is pulled upward by a few standout players, confirming right-skewed distributions.
+
+---
+
+## B.2 — Identify Feature Types
+
+```{r b2-feature-types}
+
+# ============================================================
+# B.2 IDENTIFY FEATURE TYPES
+# Clearly separates numerical and categorical columns
+# ============================================================
+
+# Identify numerical columns
+num_cols <- names(df)[sapply(df, is.numeric)]
+
+# Identify categorical columns
+cat_cols <- names(df)[sapply(df, is.character)]
+
+cat("NUMERICAL FEATURES (", length(num_cols), "total )")
+for (i in seq_along(num_cols)) {
+  cat(sprintf("%2d. %-35s (numeric)\n", i, num_cols[i]))
+}
+
+cat("CATEGORICAL FEATURES (", length(cat_cols), "total )")
+for (i in seq_along(cat_cols)) {
+  cat(sprintf("%2d. %-35s (character)\n", i, cat_cols[i]))
+}
+
+```
+
+> **Interpretation:** There are **11 numerical features** (performance metrics like Goals, Tackles, Dribbles) and **7 categorical features** (player and team information like Nationality, Position, Club). This mix makes the dataset suitable for both regression and classification tasks.
+
+---
+
+## B.3 — Missing Values Detection
+
+```{r b3-missing-table}
+
+# ============================================================
+# B.3 DETECT MISSING VALUES
+# Shows count and percentage of missing values per column
+# ============================================================
+
+missing_count   <- colSums(is.na(df))
+missing_percent <- round((missing_count / nrow(df)) * 100, 2)
+
+missing_report <- data.frame(
+  Column          = names(missing_count),
+  Missing_Count   = as.integer(missing_count),
+  Missing_Percent = paste0(missing_percent, "%")
+) %>% arrange(desc(Missing_Count))
+
+cat("MISSING VALUES REPORT")
+print(missing_report, row.names = FALSE)
+
+```
+
+```{r b3-missing-plot}
+
+# ============================================================
+# MISSING VALUES BAR CHART
+# Visual representation of missing percentage per column
+# ============================================================
+
+missing_plot <- data.frame(
+  Column  = names(missing_count),
+  Percent = as.numeric(missing_percent)
+) %>%
+  filter(Percent > 0) %>%
+  arrange(desc(Percent))
+
+ggplot(missing_plot, aes(x = reorder(Column, Percent),
+                          y = Percent, fill = Percent)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste0(Percent, "%")),
+            hjust = -0.1, size = 3.5) +
+  coord_flip() +
+  scale_fill_gradient(low = "orange", high = "red") +
+  theme_minimal() +
+  theme(legend.position = "none") +
+  ylim(0, 110) +
+  labs(
+    title    = "Missing Values (%) by Column",
+    subtitle = "Save % and Clean Sheets are missing for non-GK players",
+    x        = "Column",
+    y        = "Missing %"
+  )
+
+```
+
+> **Interpretation:** **Save Percentage (95.3%)** and **Clean Sheets (95.3%)** are almost entirely missing because these metrics only apply to Goalkeepers — this is expected, not a data error. Goals Scored, Assists Provided, and per-90 metrics have ~28–34% missing values, mostly from players with very few appearances.
+
+---
+
+## B.4 — Distributions of Numerical Features (Univariate)
+
+```{r b4-histograms}
+
+# ============================================================
+# B.4 HISTOGRAMS — NUMERICAL FEATURE DISTRIBUTIONS
+# Shows the spread and skewness of each numeric column
+# Excluding GK-only columns (Save % and Clean Sheets)
+# ============================================================
+
+plot_cols <- c("FIFA.Ranking", "Appearances", "Goals.Scored",
+               "Assists.Provided", "Dribbles.per.90",
+               "Interceptions.per.90", "Tackles.per.90",
+               "Total.Duels.Won.per.90")
+
+df %>%
+  select(all_of(plot_cols)) %>%
+  pivot_longer(everything(),
+               names_to  = "Feature",
+               values_to = "Value") %>%
+  ggplot(aes(x = Value, fill = Feature)) +
+  geom_histogram(bins = 25, color = "white", show.legend = FALSE) +
+  facet_wrap(~Feature, scales = "free", ncol = 4) +
+  theme_minimal() +
+  labs(
+    title    = "Distribution of Numerical Features",
+    subtitle = "Most performance metrics are right-skewed",
+    x        = "Value",
+    y        = "Count"
+  )
+
+```
+
+> **Interpretation:** Goals Scored, Assists Provided, and Dribbles per 90 are heavily right-skewed — most players have near-zero values while a few elite players have very high numbers. This suggests **log transformation** will be needed during preprocessing to reduce skewness.
+
+---
+
+## B.5 — Frequency of Categorical Features (Univariate)
+
+```{r b5-position}
+
+# ============================================================
+# B.5 CATEGORICAL FEATURE DISTRIBUTIONS
+# Bar charts showing frequency of each category
+# ============================================================
+
+# --- Position Distribution ---
+ggplot(df, aes(x = Position, fill = Position)) +
+  geom_bar(show.legend = FALSE) +
+  geom_text(stat = "count",
+            aes(label = after_stat(count)),
+            vjust = -0.5, size = 4) +
+  theme_minimal() +
+  labs(title    = "Player Count by Position",
+       subtitle = "DF = Defender, MF = Midfielder, FW = Forward, GK = Goalkeeper",
+       x        = "Position",
+       y        = "Count")
+
+```
+
+```{r b5-nationality}
+
+# --- Top 15 Nationalities ---
+df %>%
+  count(Nationality, sort = TRUE) %>%
+  head(15) %>%
+  ggplot(aes(x = reorder(Nationality, n), y = n, fill = n)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  geom_text(aes(label = n), hjust = -0.2, size = 3.5) +
+  coord_flip() +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  theme_minimal() +
+  ylim(0, 35) +
+  labs(title = "Top 15 Nationalities by Player Count",
+       x     = "Nationality",
+       y     = "Count")
+
+```
+
+```{r b5-sponsors}
+
+# --- Kit Sponsor and Brand Sponsor ---
+p1 <- df %>%
+  filter(!is.na(National.Team.Kit.Sponsor)) %>%
+  count(National.Team.Kit.Sponsor, sort = TRUE) %>%
+  ggplot(aes(x = reorder(National.Team.Kit.Sponsor, n), y = n,
+             fill = National.Team.Kit.Sponsor)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  geom_text(aes(label = n), hjust = -0.2, size = 3) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Kit Sponsor Distribution",
+       x = "", y = "Count")
+
+p2 <- df %>%
+  filter(!is.na(Brand.Sponsor.Brand.Used)) %>%
+  count(Brand.Sponsor.Brand.Used, sort = TRUE) %>%
+  head(10) %>%
+  ggplot(aes(x = reorder(Brand.Sponsor.Brand.Used, n), y = n,
+             fill = Brand.Sponsor.Brand.Used)) +
+  geom_bar(stat = "identity", show.legend = FALSE) +
+  geom_text(aes(label = n), hjust = -0.2, size = 3) +
+  coord_flip() +
+  theme_minimal() +
+  labs(title = "Top 10 Player Brand Sponsors",
+       x = "", y = "Count")
+
+grid.arrange(p1, p2, ncol = 2)
+
+```
+
+> **Interpretation:** Defenders (DF) are the most common position (typically 4 per team). Adidas and Nike dominate both national team kit sponsorship and individual player brand sponsorship, reflecting their dominance in global football.
+
+---
+
+## B.6 — Correlation Matrix (Bivariate)
+
+```{r b6-correlation}
+
+# ============================================================
+# B.6 CORRELATION MATRIX
+# Heatmap showing linear relationships between numeric features
+# Positive = blue, Negative = red, Strong = darker colour
+# ============================================================
+
+cor_cols <- c("FIFA.Ranking", "Appearances", "Goals.Scored",
+              "Assists.Provided", "Dribbles.per.90",
+              "Interceptions.per.90", "Tackles.per.90",
+              "Total.Duels.Won.per.90")
+
+cor_matrix <- cor(df %>% select(all_of(cor_cols)),
+                  use = "complete.obs")
+
+corrplot(
+  cor_matrix,
+  method      = "color",
+  type        = "upper",
+  tl.cex      = 0.8,
+  tl.col      = "black",
+  addCoef.col = "black",
+  number.cex  = 0.65,
+  col         = colorRampPalette(c("red", "white", "steelblue"))(200),
+  title       = "Correlation Matrix of Numerical Features",
+  mar         = c(0, 0, 2, 0)
+)
+
+```
+
+> **Interpretation:** **Goals Scored and Assists Provided** have the strongest positive correlation — attacking players contribute in both ways. **Tackles per 90 and Dribbles per 90** are negatively correlated — defenders tackle more while attackers dribble more. FIFA Ranking has weak correlation with individual stats, showing team strength doesn't directly predict individual performance.
+
+---
+
+## B.7 — Scatter Plots (Bivariate)
+
+```{r b7-scatter}
+
+# ============================================================
+# B.7 SCATTER PLOTS
+# Visual relationship between pairs of numeric features
+# Coloured by Position for extra insight
+# ============================================================
+
+# Goals vs Assists
+s1 <- df %>%
+  filter(!is.na(Goals.Scored), !is.na(Assists.Provided)) %>%
+  ggplot(aes(x = Assists.Provided, y = Goals.Scored, color = Position)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  theme_minimal() +
+  labs(title = "Goals vs Assists",
+       x = "Assists Provided", y = "Goals Scored")
+
+# Appearances vs Goals
+s2 <- df %>%
+  filter(!is.na(Appearances), !is.na(Goals.Scored)) %>%
+  ggplot(aes(x = Appearances, y = Goals.Scored, color = Position)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  theme_minimal() +
+  labs(title = "Appearances vs Goals",
+       x = "Appearances", y = "Goals Scored")
+
+# Dribbles vs Tackles
+s3 <- df %>%
+  filter(!is.na(Dribbles.per.90), !is.na(Tackles.per.90)) %>%
+  ggplot(aes(x = Dribbles.per.90, y = Tackles.per.90, color = Position)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  theme_minimal() +
+  labs(title = "Dribbles vs Tackles per 90",
+       x = "Dribbles per 90", y = "Tackles per 90")
+
+# FIFA Ranking vs Appearances
+s4 <- df %>%
+  filter(!is.na(FIFA.Ranking), !is.na(Appearances)) %>%
+  ggplot(aes(x = FIFA.Ranking, y = Appearances, color = Position)) +
+  geom_point(alpha = 0.6, size = 1.5) +
+  theme_minimal() +
+  labs(title = "FIFA Ranking vs Appearances",
+       x = "FIFA Ranking", y = "Appearances")
+
+grid.arrange(s1, s2, s3, s4, ncol = 2)
+
+```
+
+> **Interpretation:** Forwards (FW) cluster in high Goals + high Assists zones. Defenders (DF) show high Tackles and low Dribbles while Forwards show the reverse. Players from top-ranked nations (low FIFA Ranking number) tend to have more appearances, suggesting established squads give experienced players more game time.
+
+---
+
+## B.8 — Boxplots by Position (Bivariate)
+
+```{r b8-boxplots-position}
+
+# ============================================================
+# B.8 BOXPLOTS — NUMERIC FEATURES BY POSITION
+# Shows how performance metrics differ across positions
+# ============================================================
+
+b1 <- df %>% filter(!is.na(Goals.Scored)) %>%
+  ggplot(aes(x = Position, y = Goals.Scored, fill = Position)) +
+  geom_boxplot(show.legend = FALSE, outlier.colour = "red") +
+  theme_minimal() +
+  labs(title = "Goals Scored by Position",
+       x = "Position", y = "Goals")
+
+b2 <- df %>% filter(!is.na(Assists.Provided)) %>%
+  ggplot(aes(x = Position, y = Assists.Provided, fill = Position)) +
+  geom_boxplot(show.legend = FALSE, outlier.colour = "red") +
+  theme_minimal() +
+  labs(title = "Assists by Position",
+       x = "Position", y = "Assists")
+
+b3 <- df %>% filter(!is.na(Tackles.per.90)) %>%
+  ggplot(aes(x = Position, y = Tackles.per.90, fill = Position)) +
+  geom_boxplot(show.legend = FALSE, outlier.colour = "red") +
+  theme_minimal() +
+  labs(title = "Tackles per 90 by Position",
+       x = "Position", y = "Tackles/90")
+
+b4 <- df %>% filter(!is.na(Dribbles.per.90)) %>%
+  ggplot(aes(x = Position, y = Dribbles.per.90, fill = Position)) +
+  geom_boxplot(show.legend = FALSE, outlier.colour = "red") +
+  theme_minimal() +
+  labs(title = "Dribbles per 90 by Position",
+       x = "Position", y = "Dribbles/90")
+
+grid.arrange(b1, b2, b3, b4, ncol = 2)
+
+```
+
+> **Interpretation:** Forwards score the most goals and provide the most assists. Defenders lead in tackles per 90 while Forwards and Midfielders lead in dribbles. These distinct statistical profiles confirm that Position is a strong differentiator and will be a useful target variable for classification.
+
+---
+
+## B.9 — Outlier Detection
+
+```{r b9-outliers}
+
+# ============================================================
+# B.9 OUTLIER DETECTION
+# Boxplots to visualise extreme values in numeric columns
+# Red dots = values beyond 1.5 x IQR (potential outliers)
+# ============================================================
+
+df %>%
+  select(all_of(plot_cols)) %>%
+  pivot_longer(everything(),
+               names_to  = "Feature",
+               values_to = "Value") %>%
+  ggplot(aes(x = Feature, y = Value, fill = Feature)) +
+  geom_boxplot(outlier.colour = "red",
+               outlier.size   = 2,
+               show.legend    = FALSE) +
+  facet_wrap(~Feature, scales = "free", ncol = 4) +
+  theme_minimal() +
+  theme(axis.text.x = element_blank()) +
+  labs(
+    title    = "Outlier Detection — Numerical Features",
+    subtitle = "Red dots = outliers beyond 1.5 x IQR",
+    x        = "",
+    y        = "Value"
+  )
+
+```
+
+> **Interpretation:** **Goals Scored, Assists Provided, and Appearances** show the most significant outliers. These belong to star players (e.g., high-cap veterans) and are genuine extreme values — not data errors. During preprocessing, these will be **capped using the IQR method** (Winsorization) rather than removed, to preserve the data while reducing their extreme influence on models.
+
+
+---
+
+# Part C: Data Preprocessing
+
+## C.1 — Create Preprocessing Dataset
+
+```{r c1-create-preprocessing-dataset}
+
+# ============================================================
+# C.1 CREATE PREPROCESSING DATASET
+# ============================================================
+# In this section, we create a separate copy of the original dataset.
+# This is important because we do not want to modify the original df
+# that was used for data collection and EDA.
+#
+# Selected Task     : Classification
+# Target Variable   : Position
+# Project Objective : Predict a player's position using performance stats
+# ============================================================
+
+# Create a copy of the original dataset
+processed_df <- df
+
+# Display initial size of the preprocessing dataset
+cat("Preprocessing dataset created successfully.\n")
+cat("Initial Rows    :", nrow(processed_df), "\n")
+cat("Initial Columns :", ncol(processed_df), "\n")
+
+# Check the first few rows
+head(processed_df)
+
+```
+
+> **Interpretation:** A separate copy named `processed_df` was created from the original dataset `df`. This allows preprocessing steps to be applied safely without changing the original dataset used in Part A and Part B. The selected machine learning task is classification, where the target variable is `Position`.
+
+---
+
+## C.2 — Remove Unnecessary Columns
+
+```{r c2-remove-unnecessary-columns}
+
+# ============================================================
+# C.2 REMOVE UNNECESSARY COLUMNS
+# ============================================================
+# Some columns are not suitable for model building.
+#
+# Full.Name:
+#   This is only an identifier and does not help predict position.
+#
+# National.Team.Jersey.Number:
+#   Jersey number is not a reliable performance-based predictor.
+#
+# Save.Percentage and Clean.Sheets:
+#   These columns mostly apply only to Goalkeepers and contain very high
+#   missing values for other positions.
+# ============================================================
+
+columns_to_remove <- c(
+  "Full.Name",
+  "National.Team.Jersey.Number",
+  "Save.Percentage",
+  "Clean.Sheets"
+)
+
+# Remove only those columns that actually exist in the dataset
+processed_df <- processed_df %>%
+  select(-any_of(columns_to_remove))
+
+cat("Columns removed from the modeling dataset:\n")
+print(columns_to_remove)
+
+cat("\nRows after column removal    :", nrow(processed_df), "\n")
+cat("Columns after column removal :", ncol(processed_df), "\n")
+
+```
+
+> **Interpretation:** Identifier columns and highly position-specific goalkeeper columns were removed before modeling. This helps prevent unnecessary noise and avoids bias from features that are not useful for predicting all player positions equally.
+
+---
+
+## C.3 — Remove Missing Target Values
+
+```{r c3-remove-missing-target-values}
+
+# ============================================================
+# C.3 REMOVE MISSING TARGET VALUES
+# ============================================================
+# Since Position is the target variable, rows with missing Position
+# cannot be used for supervised classification.
+# ============================================================
+
+processed_df <- processed_df %>%
+  filter(!is.na(Position))
+
+# Convert target variable to factor
+processed_df$Position <- as.factor(processed_df$Position)
+
+cat("Rows after removing missing target values:", nrow(processed_df), "\n")
+
+cat("\nTarget variable levels:\n")
+print(levels(processed_df$Position))
+
+cat("\nClass distribution of target variable:\n")
+print(table(processed_df$Position))
+
+```
+
+> **Interpretation:** Rows with missing `Position` values were removed because the model needs a known target label during training. The `Position` column was converted into a factor because classification models in R require the target variable to be categorical.
+
+---
+
+## C.4 — Reduce High-Cardinality Categorical Variables
+
+```{r c4-reduce-high-cardinality-categories}
+
+# ============================================================
+# C.4 REDUCE HIGH-CARDINALITY CATEGORICAL VARIABLES
+# ============================================================
+# Some categorical variables may have many unique values.
+# For example, Club, Nationality, and Brand Sponsor can create too many
+# dummy variables during encoding.
+#
+# To reduce complexity:
+# - Keep the most frequent categories
+# - Group less frequent categories into "Other"
+# ============================================================
+
+reduce_categories <- function(x, top_n = 15) {
+  
+  # Convert to character so values can be edited
+  x <- as.character(x)
+  
+  # Find the most frequent categories
+  top_categories <- names(sort(table(x), decreasing = TRUE))[1:min(top_n, length(unique(x)))]
+  
+  # Replace all less frequent categories with "Other"
+  x[!(x %in% top_categories)] <- "Other"
+  
+  # Return as factor
+  return(as.factor(x))
+}
+
+# Reduce categories for selected high-cardinality columns
+if ("Club" %in% names(processed_df)) {
+  processed_df$Club <- reduce_categories(processed_df$Club, top_n = 15)
+}
+
+if ("Nationality" %in% names(processed_df)) {
+  processed_df$Nationality <- reduce_categories(processed_df$Nationality, top_n = 15)
+}
+
+if ("Brand.Sponsor.Brand.Used" %in% names(processed_df)) {
+  processed_df$Brand.Sponsor.Brand.Used <- reduce_categories(processed_df$Brand.Sponsor.Brand.Used, top_n = 10)
+}
+
+cat("High-cardinality categorical variables reduced successfully.\n")
+
+# Display number of unique categories after reduction
+cat("\nUnique values after reduction:\n")
+
+if ("Club" %in% names(processed_df)) {
+  cat("Club:", length(unique(processed_df$Club)), "\n")
+}
+
+if ("Nationality" %in% names(processed_df)) {
+  cat("Nationality:", length(unique(processed_df$Nationality)), "\n")
+}
+
+if ("Brand.Sponsor.Brand.Used" %in% names(processed_df)) {
+  cat("Brand Sponsor:", length(unique(processed_df$Brand.Sponsor.Brand.Used)), "\n")
+}
+
+```
+
+> **Interpretation:** High-cardinality categorical variables were simplified by keeping only the most frequent categories and grouping the rest as `Other`. This prevents the model from creating too many dummy variables and helps improve readability, efficiency, and generalization.
+
+---
+
+## C.5 — Train-Test Split
+
+```{r c5-train-test-split}
+
+# ============================================================
+# C.5 TRAIN-TEST SPLIT
+# ============================================================
+# The dataset is divided into:
+# - 80% training data
+# - 20% testing data
+#
+# createDataPartition() is used because it maintains the class distribution
+# of the target variable Position in both training and testing datasets.
+# ============================================================
+
+set.seed(42)
+
+train_index <- createDataPartition(
+  processed_df$Position,
+  p = 0.80,
+  list = FALSE
+)
+
+train_data <- processed_df[train_index, ]
+test_data  <- processed_df[-train_index, ]
+
+cat("Training Rows:", nrow(train_data), "\n")
+cat("Testing Rows :", nrow(test_data), "\n")
+
+cat("\nClass distribution in training data:\n")
+print(table(train_data$Position))
+
+cat("\nClass distribution in testing data:\n")
+print(table(test_data$Position))
+
+```
+
+> **Interpretation:** The dataset was split into training and testing sets using an 80:20 ratio. The training set is used to build the model, while the testing set is used to evaluate performance on unseen data. Stratified splitting helps keep the position distribution similar in both sets.
+
+---
+
+## C.6 — Handle Missing Values
+
+```{r c6-handle-missing-values}
+
+# ============================================================
+# C.6 HANDLE MISSING VALUES
+# ============================================================
+# Missing values are handled separately for numerical and categorical columns.
+#
+# Numerical columns:
+#   Missing values are replaced with the median from the training data.
+#   Median is better than mean here because football statistics are skewed.
+#
+# Categorical columns:
+#   Missing values are replaced with the mode from the training data.
+#
+# Important:
+#   Imputation values are calculated from training data only and then applied
+#   to both training and testing data. This prevents data leakage.
+# ============================================================
+
+# Identify numerical columns
+numeric_cols <- names(train_data)[sapply(train_data, is.numeric)]
+
+# Identify categorical predictor columns
+categorical_cols <- names(train_data)[sapply(train_data, function(x) {
+  is.character(x) | is.factor(x)
+})]
+
+# Remove target variable from categorical predictor list
+categorical_cols <- setdiff(categorical_cols, "Position")
+
+# Function to calculate mode
+get_mode <- function(x) {
+  x <- x[!is.na(x)]
+  ux <- unique(x)
+  ux[which.max(tabulate(match(x, ux)))]
+}
+
+# Impute missing values in numerical columns
+for (col in numeric_cols) {
+  
+  train_median <- median(train_data[[col]], na.rm = TRUE)
+  
+  train_data[[col]][is.na(train_data[[col]])] <- train_median
+  test_data[[col]][is.na(test_data[[col]])]   <- train_median
+}
+
+# Impute missing values in categorical columns
+for (col in categorical_cols) {
+  
+  train_mode <- get_mode(train_data[[col]])
+  
+  train_data[[col]][is.na(train_data[[col]])] <- train_mode
+  test_data[[col]][is.na(test_data[[col]])]   <- train_mode
+}
+
+cat("Missing values after imputation:\n")
+cat("Training Data Missing Values:", sum(is.na(train_data)), "\n")
+cat("Testing Data Missing Values :", sum(is.na(test_data)), "\n")
+
+```
+
+> **Interpretation:** Missing numerical values were replaced using the median because many football performance variables are skewed. Missing categorical values were replaced using the mode, which represents the most common category. The imputation values were calculated from the training data only to avoid data leakage.
+
+---
+
+## C.7 — Handle Outliers Using IQR Capping
+
+```{r c7-handle-outliers}
+
+# ============================================================
+# C.7 HANDLE OUTLIERS USING IQR CAPPING
+# ============================================================
+# In sports datasets, extreme values may represent real elite performance.
+# Therefore, outliers are capped instead of removed.
+#
+# IQR Method:
+# Lower Bound = Q1 - 1.5 * IQR
+# Upper Bound = Q3 + 1.5 * IQR
+#
+# Important:
+# If IQR = 0, the column is skipped.
+# This prevents sparse variables like Goals and Assists from being
+# incorrectly capped to zero.
+#
+# Bounds are calculated using training data only and applied to both
+# training and testing data to prevent data leakage.
+# ============================================================
+
+capped_columns <- c()
+skipped_columns <- c()
+
+for (col in numeric_cols) {
+  
+  Q1 <- quantile(train_data[[col]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(train_data[[col]], 0.75, na.rm = TRUE)
+  IQR_value <- Q3 - Q1
+  
+  # Skip capping if IQR is zero
+  if (IQR_value == 0) {
+    skipped_columns <- c(skipped_columns, col)
+    next
+  }
+  
+  lower_bound <- Q1 - 1.5 * IQR_value
+  upper_bound <- Q3 + 1.5 * IQR_value
+  
+  # Cap training data
+  train_data[[col]][train_data[[col]] < lower_bound] <- lower_bound
+  train_data[[col]][train_data[[col]] > upper_bound] <- upper_bound
+  
+  # Cap testing data using training bounds
+  test_data[[col]][test_data[[col]] < lower_bound] <- lower_bound
+  test_data[[col]][test_data[[col]] > upper_bound] <- upper_bound
+  
+  capped_columns <- c(capped_columns, col)
+}
+
+cat("Outlier capping completed using the IQR method.\n")
+
+cat("\nColumns capped:\n")
+print(capped_columns)
+
+cat("\nColumns skipped because IQR = 0:\n")
+print(skipped_columns)
+
+```
+
+> **Interpretation:** Outliers were capped using the IQR method instead of being removed. This is suitable for football data because extreme values may represent star players or exceptional performances rather than errors. Columns with IQR equal to zero were skipped to avoid incorrectly changing useful sparse variables such as goals or assists. This preserves important football performance information while still reducing the influence of extreme values where appropriate.
+
+---
+
+## C.8 — Reduce Skewness Using Log Transformation
+
+```{r c8-log-transformation}
+
+# ============================================================
+# C.8 REDUCE SKEWNESS USING LOG TRANSFORMATION
+# ============================================================
+# Many football statistics such as goals and assists are right-skewed.
+# Most players have low values, while a few players have high values.
+#
+# log1p(x) is used because it safely handles zero values:
+# log1p(x) = log(1 + x)
+#
+# New transformed features are created rather than replacing original columns.
+# ============================================================
+
+skewed_cols <- c(
+  "Goals.Scored",
+  "Assists.Provided",
+  "Dribbles.per.90",
+  "Interceptions.per.90",
+  "Tackles.per.90",
+  "Total.Duels.Won.per.90"
+)
+
+for (col in skewed_cols) {
+  
+  if (col %in% names(train_data)) {
+    
+    train_data[[paste0(col, "_log")]] <- log1p(train_data[[col]])
+    test_data[[paste0(col, "_log")]]  <- log1p(test_data[[col]])
+  }
+}
+
+cat("Log transformation completed for skewed numerical features.\n")
+
+cat("\nLog-transformed columns created:\n")
+print(paste0(skewed_cols, "_log"))
+```
+> **Interpretation:** Log transformation was applied to skewed football performance variables such as goals, assists, dribbles, tackles, and interceptions. This reduces the effect of highly skewed distributions and helps the model learn patterns more effectively.Goalkeepers may be identified well because their general playing statistics differ from outfield players, although goalkeeper-specific features such as Save Percentage and Clean Sheets were removed before modeling due to high missingness.
+
+---
+
+## C.9 — Feature Engineering
+
+```{r c9-feature-engineering}
+
+# ============================================================
+# C.9 FEATURE ENGINEERING
+# ============================================================
+# Feature engineering creates new meaningful variables from existing data.
+#
+# Goal_Assist_Total:
+#   Total direct attacking contribution.
+#
+# Defensive_Total:
+#   Combined defensive activity using tackles and interceptions.
+#
+# Attack_Defense_Ratio:
+#   Compares attacking contribution to defensive contribution.
+#   Adding 1 prevents division by zero.
+# ============================================================
+
+train_data <- train_data %>%
+  mutate(
+    Goal_Assist_Total = Goals.Scored + Assists.Provided,
+    Defensive_Total = Tackles.per.90 + Interceptions.per.90,
+    Attack_Defense_Ratio = Goal_Assist_Total / (Defensive_Total + 1)
+  )
+
+test_data <- test_data %>%
+  mutate(
+    Goal_Assist_Total = Goals.Scored + Assists.Provided,
+    Defensive_Total = Tackles.per.90 + Interceptions.per.90,
+    Attack_Defense_Ratio = Goal_Assist_Total / (Defensive_Total + 1)
+  )
+
+cat("Feature engineering completed successfully.\n")
+cat("New features added:\n")
+cat("1. Goal_Assist_Total\n")
+cat("2. Defensive_Total\n")
+cat("3. Attack_Defense_Ratio\n")
+
+head(train_data[, c("Goal_Assist_Total", "Defensive_Total", "Attack_Defense_Ratio")])
+
+```
+
+> **Interpretation:** Three new football-related features were created. `Goal_Assist_Total` measures attacking contribution, `Defensive_Total` measures defensive activity, and `Attack_Defense_Ratio` compares attacking and defensive contribution. These features are meaningful because different positions have different playing responsibilities.
+
+---
+
+## C.10 — Encode Categorical Variables
+
+```{r c10-encode-categorical-variables}
+
+# ============================================================
+# C.10 ENCODE CATEGORICAL VARIABLES
+# ============================================================
+# Machine learning models require numerical input.
+# Therefore, categorical predictor variables are converted into dummy variables.
+#
+# The target variable Position is not encoded as a predictor because it is
+# the class label we want to predict.
+# ============================================================
+
+# Recalculate categorical predictor columns after previous steps
+categorical_cols <- names(train_data)[sapply(train_data, function(x) {
+  is.character(x) | is.factor(x)
+})]
+
+categorical_cols <- setdiff(categorical_cols, "Position")
+
+# Convert categorical predictors to factor
+for (col in categorical_cols) {
+  
+  train_data[[col]] <- as.factor(train_data[[col]])
+  test_data[[col]]  <- as.factor(test_data[[col]])
+  
+  # Ensure test data uses the same factor levels as training data
+  test_data[[col]] <- factor(test_data[[col]], levels = levels(train_data[[col]]))
+}
+
+# Create dummy variable model using training data
+dummy_model <- dummyVars(
+  Position ~ .,
+  data = train_data,
+  fullRank = TRUE
+)
+
+# Apply dummy variable transformation
+train_encoded <- predict(dummy_model, newdata = train_data)
+test_encoded  <- predict(dummy_model, newdata = test_data)
+
+# Convert encoded matrices to data frames
+train_encoded <- as.data.frame(train_encoded)
+test_encoded  <- as.data.frame(test_encoded)
+
+# Replace any remaining NA values with 0
+train_encoded[is.na(train_encoded)] <- 0
+test_encoded[is.na(test_encoded)]   <- 0
+
+cat("Categorical encoding completed successfully.\n")
+cat("Training encoded columns:", ncol(train_encoded), "\n")
+cat("Testing encoded columns :", ncol(test_encoded), "\n")
+
+```
+
+> **Interpretation:** Categorical predictors were converted into dummy variables so they could be used by the machine learning model. The target variable `Position` was excluded from encoding as a predictor because it is the output variable that the model will predict.
+
+---
+
+## C.11 — Remove Near-Zero Variance Features
+
+```{r c11-remove-near-zero-variance}
+
+# ============================================================
+# C.11 REMOVE NEAR-ZERO VARIANCE FEATURES
+# ============================================================
+# Some encoded variables may have almost the same value for all rows.
+# These variables provide little useful information for the model.
+# nearZeroVar() identifies and removes such features.
+# ============================================================
+
+nzv_cols <- nearZeroVar(train_encoded)
+
+if (length(nzv_cols) > 0) {
+  train_encoded <- train_encoded[, -nzv_cols, drop = FALSE]
+  test_encoded  <- test_encoded[, -nzv_cols, drop = FALSE]
+}
+
+cat("Near-zero variance feature removal completed.\n")
+cat("Number of near-zero variance columns removed:", length(nzv_cols), "\n")
+
+cat("\nColumns remaining after removal:", ncol(train_encoded), "\n")
+
+```
+
+> **Interpretation:** Near-zero variance features were removed because they do not provide meaningful information for classification. Removing these variables makes the model simpler and can improve performance.
+
+---
+
+## C.12 — Standardize Numerical Features
+
+```{r c12-standardization}
+
+# ============================================================
+# C.12 STANDARDIZE NUMERICAL FEATURES
+# ============================================================
+# Standardization transforms features so that:
+# Mean = 0
+# Standard Deviation = 1
+#
+# Scaling is calculated from the training data only and then applied to
+# the testing data. This prevents data leakage.
+# ============================================================
+
+# Note:
+# Random Forest does not strictly require feature scaling because it is
+# a tree-based model. However, standardization is included because the
+# final project guideline requires normalization/standardization, and it
+# also keeps the dataset ready for other machine learning models.
+
+scaling_model <- preProcess(
+  train_encoded,
+  method = c("center", "scale")
+)
+
+train_scaled <- predict(scaling_model, train_encoded)
+test_scaled  <- predict(scaling_model, test_encoded)
+
+cat("Standardization completed successfully.\n")
+
+# Create final training and testing datasets
+final_train <- data.frame(
+  Position = train_data$Position,
+  train_scaled,
+  check.names = TRUE
+)
+
+final_test <- data.frame(
+  Position = test_data$Position,
+  test_scaled,
+  check.names = TRUE
+)
+
+cat("\nFinal training dataset:\n")
+cat("Rows    :", nrow(final_train), "\n")
+cat("Columns :", ncol(final_train), "\n")
+
+cat("\nFinal testing dataset:\n")
+cat("Rows    :", nrow(final_test), "\n")
+cat("Columns :", ncol(final_test), "\n")
+
+cat("\nMissing values in final training data:", sum(is.na(final_train)), "\n")
+cat("Missing values in final testing data :", sum(is.na(final_test)), "\n")
+
+```
+
+> **Interpretation:** All predictor variables were standardized so that they have a mean of 0 and a standard deviation of 1. This ensures that variables with larger numerical ranges do not dominate the model. The final processed datasets, `final_train` and `final_test`, are now ready for modeling.
+
+---
+
+# Part D: Modeling and Evaluation
+
+## D.1 — Model Selection
+
+```{r d1-model-selection}
+
+# ============================================================
+# D.1 MODEL SELECTION
+# ============================================================
+# The selected machine learning task is Classification.
+#
+# Target Variable : Position
+# Model Selected  : Random Forest
+#
+# Random Forest is chosen because:
+# 1. It works well for classification problems.
+# 2. It can handle many predictor variables.
+# 3. It captures non-linear relationships.
+# 4. It is suitable for multi-class classification.
+# 5. It provides feature importance for interpretation.
+# ============================================================
+
+# Install randomForest package if it is not already installed
+#if (!("randomForest" %in% rownames(installed.packages()))) {
+  #install.packages("randomForest", repos = "https://cran.rstudio.com/")
+#}
+
+# Load randomForest package
+#library(randomForest)
+
+cat("Model selected: Random Forest Classification\n")
+cat("Target variable: Position\n")
+cat("Training rows:", nrow(final_train), "\n")
+cat("Testing rows :", nrow(final_test), "\n")
+
+```
+
+> **Interpretation:** Random Forest was selected for this classification task because it can handle many features, capture complex relationships, and work well with multi-class target variables. Since the target variable is `Position`, the model will predict whether a player is a Defender, Midfielder, Forward, or Goalkeeper.
+
+---
+
+## D.2 — Train the Random Forest Model
+
+```{r d2-train-random-forest-model}
+
+# ============================================================
+# D.2 TRAIN THE RANDOM FOREST MODEL
+# ============================================================
+# The model is trained using the final preprocessed training dataset.
+#
+# ntree = 500:
+#   The model builds 500 decision trees.
+#
+# importance = TRUE:
+#   This allows us to calculate which features are most important.
+# ============================================================
+
+set.seed(42)
+
+rf_model <- randomForest(
+  Position ~ .,
+  data = final_train,
+  ntree = 500,
+  importance = TRUE
+)
+
+cat("Random Forest model trained successfully.\n\n")
+
+# Display model summary
+print(rf_model)
+
+```
+
+> **Interpretation:** The Random Forest model was trained using the processed training dataset. The model builds many decision trees and combines their predictions to improve classification performance. The model summary shows the out-of-bag error and class-wise performance during training.
+
+---
+
+## D.3 — Make Predictions on Test Data
+
+```{r d3-make-predictions}
+
+# ============================================================
+# D.3 MAKE PREDICTIONS ON TEST DATA
+# ============================================================
+# The trained model is now used to predict player positions in the test set.
+# The test set contains unseen data, so it provides a fair evaluation of
+# model performance.
+# ============================================================
+
+rf_predictions <- predict(
+  rf_model,
+  newdata = final_test
+)
+
+cat("Predictions generated successfully.\n")
+
+# Show first few predicted and actual values
+prediction_comparison <- data.frame(
+  Actual_Position = final_test$Position,
+  Predicted_Position = rf_predictions
+)
+
+head(prediction_comparison, 10)
+
+```
+
+> **Interpretation:** The trained Random Forest model was used to predict player positions on the test dataset. Comparing actual positions with predicted positions helps evaluate how well the model performs on unseen data.
+
+---
+
+## D.4 — Confusion Matrix
+
+```{r d4-confusion-matrix}
+
+# ============================================================
+# D.4 CONFUSION MATRIX
+# ============================================================
+# A confusion matrix compares actual positions with predicted positions.
+#
+# Diagonal values:
+#   Correct predictions
+#
+# Off-diagonal values:
+#   Incorrect predictions
+# ============================================================
+
+conf_matrix <- confusionMatrix(
+  rf_predictions,
+  final_test$Position
+)
+
+cat("Confusion Matrix and Classification Statistics:\n")
+print(conf_matrix)
+
+```
+
+> **Interpretation:** The confusion matrix shows how many players were correctly and incorrectly classified for each position. Correct predictions appear on the diagonal, while misclassifications appear outside the diagonal. This helps identify which positions the model predicts well and which positions are commonly confused.
+
+---
+
+## D.5 — Classification Evaluation Metrics
+
+```{r d5-classification-evaluation-metrics}
+
+# ============================================================
+# D.5 CLASSIFICATION EVALUATION METRICS
+# ============================================================
+# The final project guideline requires the following metrics for
+# classification:
+#
+# 1. Accuracy
+# 2. Precision
+# 3. Recall
+# 4. F1-score
+#
+# These metrics are calculated below.
+# ============================================================
+
+# Extract overall accuracy
+overall_accuracy <- conf_matrix$overall["Accuracy"]
+
+cat("Overall Model Accuracy:", round(overall_accuracy, 4), "\n")
+
+# Extract confusion matrix table
+conf_table <- conf_matrix$table
+
+# Get class names
+classes <- colnames(conf_table)
+
+# Create empty data frame for evaluation results
+evaluation_results <- data.frame(
+  Class = character(),
+  Precision = numeric(),
+  Recall = numeric(),
+  F1_Score = numeric()
+)
+
+# Calculate precision, recall and F1-score for each class
+for (class_name in classes) {
+  
+  # True Positive
+  TP <- conf_table[class_name, class_name]
+  
+  # False Positive
+  FP <- sum(conf_table[class_name, ]) - TP
+  
+  # False Negative
+  FN <- sum(conf_table[, class_name]) - TP
+  
+  # Precision = TP / (TP + FP)
+  precision <- ifelse((TP + FP) == 0, 0, TP / (TP + FP))
+  
+  # Recall = TP / (TP + FN)
+  recall <- ifelse((TP + FN) == 0, 0, TP / (TP + FN))
+  
+  # F1-score = 2 * Precision * Recall / (Precision + Recall)
+  f1_score <- ifelse(
+    (precision + recall) == 0,
+    0,
+    2 * ((precision * recall) / (precision + recall))
+  )
+  
+  evaluation_results <- rbind(
+    evaluation_results,
+    data.frame(
+      Class = class_name,
+      Precision = round(precision, 4),
+      Recall = round(recall, 4),
+      F1_Score = round(f1_score, 4)
+    )
+  )
+}
+
+cat("\nClass-wise Evaluation Metrics:\n")
+print(evaluation_results, row.names = FALSE)
+
+# Macro-average metrics
+macro_precision <- mean(evaluation_results$Precision)
+macro_recall    <- mean(evaluation_results$Recall)
+macro_f1        <- mean(evaluation_results$F1_Score)
+
+cat("\nMacro Average Precision:", round(macro_precision, 4), "\n")
+cat("Macro Average Recall   :", round(macro_recall, 4), "\n")
+cat("Macro Average F1-score :", round(macro_f1, 4), "\n")
+
+```
+
+> **Interpretation:** Accuracy shows the overall percentage of correctly predicted player positions. Precision shows how many players predicted as a certain position actually belonged to that position. Recall shows how many actual players of a certain position were correctly identified. F1-score combines precision and recall into one balanced metric. These class-wise metrics are useful because the model may perform better for some positions than others.
+
+---
+
+## D.6 — Confusion Matrix Visualization
+
+```{r d6-confusion-matrix-visualization}
+
+# ============================================================
+# D.6 CONFUSION MATRIX VISUALIZATION
+# ============================================================
+# This heatmap visually shows the confusion matrix.
+#
+# Darker cells indicate higher counts.
+# Diagonal cells show correct classifications.
+# Off-diagonal cells show incorrect classifications.
+# ============================================================
+
+confusion_df <- as.data.frame(conf_matrix$table)
+
+ggplot(confusion_df, aes(x = Reference, y = Prediction, fill = Freq)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = Freq), size = 5) +
+  scale_fill_gradient(low = "lightblue", high = "steelblue") +
+  theme_minimal() +
+  labs(
+    title = "Confusion Matrix Heatmap",
+    subtitle = "Actual Position vs Predicted Position",
+    x = "Actual Position",
+    y = "Predicted Position",
+    fill = "Count"
+  )
+
+```
+
+> **Interpretation:** The confusion matrix heatmap visually compares actual and predicted player positions. The diagonal cells represent correct predictions, while the off-diagonal cells show incorrect predictions. This plot helps identify which positions are classified well and which positions are commonly confused by the model.
+
+---
+
+## D.7 — Feature Importance
+
+```{r d7-feature-importance}
+
+# ============================================================
+# D.7 FEATURE IMPORTANCE
+# ============================================================
+# Random Forest provides feature importance values.
+#
+# MeanDecreaseGini:
+#   A higher value means the feature was more useful in splitting the data
+#   and improving prediction quality.
+# ============================================================
+
+# Extract feature importance values
+importance_values <- importance(rf_model)
+
+importance_df <- data.frame(
+  Feature = rownames(importance_values),
+  Importance = importance_values[, "MeanDecreaseGini"]
+)
+
+# Sort features by importance
+importance_df <- importance_df %>%
+  arrange(desc(Importance))
+
+# Select top 15 features
+top_features <- importance_df %>%
+  head(15)
+
+cat("Top 15 Important Features:\n")
+print(top_features, row.names = FALSE)
+
+# Plot top 15 important features
+ggplot(top_features, aes(x = reorder(Feature, Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Top 15 Important Features in Random Forest Model",
+    subtitle = "Higher importance means stronger contribution to predicting Position",
+    x = "Feature",
+    y = "Mean Decrease in Gini"
+  )
+
+```
+
+> **Interpretation:** The feature importance plot shows which variables contributed most to predicting player position. Performance-based variables such as tackles, interceptions, dribbles, goals, assists, and engineered features are expected to be important because different football positions have different statistical roles.
+
+---
+
+## D.8 — Final Modeling Interpretation
+
+The Random Forest model was used to classify football players into positions using the preprocessed FIFA World Cup 2022 player statistics. The target variable was `Position`, making this a multi-class classification problem.
+
+The model was evaluated using Accuracy, Precision, Recall, F1-score, and a Confusion Matrix. These metrics are appropriate for classification because they show both overall performance and class-wise prediction quality.
+
+The model is expected to perform better for positions with clearly different statistical profiles. For example, defenders usually have higher tackles and interceptions, while forwards usually have higher goals, assists, and dribbles. Some confusion may occur between midfielders and forwards or between midfielders and defenders because these roles can overlap in real football matches.
+
+Overall, this modeling section completes the classification task by training a machine learning model, evaluating it with proper metrics, visualizing the results, and interpreting the most important features.
+
+---
+
+
+# Part E: Evaluation & Interpretation
+
+## E.1 — What the Metrics Mean
+
+```{r e1-metrics-explanation}
+
+# ============================================================
+# E.1 WHAT THE METRICS MEAN
+# ============================================================
+# Before reporting results, it is important to understand what
+# each classification metric measures and why it is used.
+#
+# ACCURACY:
+#   The percentage of all players whose position was correctly
+#   predicted out of the total test set.
+#   Formula: (TP + TN) / Total
+#   Limitation: Can be misleading if classes are imbalanced.
+#
+# PRECISION:
+#   Of all players the model predicted as a given position,
+#   what fraction actually belonged to that position?
+#   Formula: TP / (TP + FP)
+#   High precision = fewer false positives.
+#
+# RECALL (Sensitivity):
+#   Of all players who truly belong to a given position,
+#   what fraction did the model correctly identify?
+#   Formula: TP / (TP + FN)
+#   High recall = fewer false negatives.
+#
+# F1-SCORE:
+#   The harmonic mean of Precision and Recall.
+#   Formula: 2 * (Precision * Recall) / (Precision + Recall)
+#   Best single metric when both false positives and false
+#   negatives carry equal importance.
+#
+# TP = True Positive  | FP = False Positive
+# TN = True Negative  | FN = False Negative
+# ============================================================
+
+cat("============================================================\n")
+cat("         PART E: EVALUATION & INTERPRETATION               \n")
+cat("============================================================\n\n")
+
+cat("METRIC DEFINITIONS\n")
+cat("------------------------------------------------------------\n")
+cat(sprintf("%-15s : %s\n", "Accuracy",  "Overall % of correct predictions"))
+cat(sprintf("%-15s : %s\n", "Precision", "TP / (TP + FP) — avoids false positives"))
+cat(sprintf("%-15s : %s\n", "Recall",    "TP / (TP + FN) — avoids false negatives"))
+cat(sprintf("%-15s : %s\n", "F1-Score",  "Harmonic mean of Precision and Recall"))
+cat("------------------------------------------------------------\n")
+
+```
+
+> **Interpretation:** In a multi-class classification problem like predicting player position (DF, MF, FW, GK), a single accuracy number does not tell the full story. A model could achieve high overall accuracy while performing poorly on minority classes. Therefore, Precision, Recall, and F1-Score are reported for **each position individually**, giving a complete and honest picture of model performance.
+
+---
+
+## E.2 — Overall Accuracy
+
+```{r e2-overall-accuracy}
+
+# ============================================================
+# E.2 OVERALL ACCURACY
+# ============================================================
+# Accuracy is the most straightforward metric.
+# It counts how many players were correctly classified
+# out of all players in the test set.
+#
+# Formula:
+#   Accuracy = Correct Predictions / Total Predictions
+# ============================================================
+
+# Extract values from the confusion matrix object (already built in D.4)
+total_predictions   <- length(rf_predictions)
+correct_predictions <- sum(rf_predictions == final_test$Position)
+wrong_predictions   <- total_predictions - correct_predictions
+overall_accuracy    <- correct_predictions / total_predictions
+
+cat("============================================================\n")
+cat("                   OVERALL ACCURACY                        \n")
+cat("============================================================\n")
+cat(sprintf("Total Players in Test Set   : %d\n",   total_predictions))
+cat(sprintf("Correctly Classified        : %d\n",   correct_predictions))
+cat(sprintf("Incorrectly Classified      : %d\n",   wrong_predictions))
+cat(sprintf("Overall Accuracy            : %.2f%%\n", overall_accuracy * 100))
+cat("============================================================\n")
+
+```
+
+> **Interpretation:** The Random Forest model correctly classified **`r correct_predictions` out of `r total_predictions`** players in the test set, achieving an overall accuracy of **`r round(overall_accuracy * 100, 2)`%**. This means that for roughly every 10 players shown to the model, it correctly predicts the field position of `r floor(overall_accuracy * 10)` of them using match statistics alone — without knowing the player's name or club.
+
+---
+
+## E.3 — Per-Class Precision, Recall & F1-Score
+
+```{r e3-per-class-metrics}
+
+# ============================================================
+# E.3 PER-CLASS PRECISION, RECALL & F1-SCORE
+# ============================================================
+# Metrics are calculated manually from the confusion matrix table
+# for each of the four positions: DF, FW, GK, MF.
+#
+# For each class:
+#   TP = players of that class correctly predicted as that class
+#   FP = players of other classes incorrectly predicted as that class
+#   FN = players of that class incorrectly predicted as another class
+#   TN = all other players correctly not predicted as that class
+# ============================================================
+
+# Reuse the confusion matrix table from Part D
+conf_table <- conf_matrix$table
+classes    <- colnames(conf_table)
+
+# Build a detailed metrics data frame for all four positions
+metrics_list <- lapply(classes, function(class_name) {
+
+  TP <- conf_table[class_name, class_name]
+  FP <- sum(conf_table[class_name, ]) - TP
+  FN <- sum(conf_table[, class_name]) - TP
+  TN <- sum(conf_table) - TP - FP - FN
+
+  precision <- ifelse((TP + FP) == 0, 0, TP / (TP + FP))
+  recall    <- ifelse((TP + FN) == 0, 0, TP / (TP + FN))
+  f1        <- ifelse(
+    (precision + recall) == 0, 0,
+    2 * (precision * recall) / (precision + recall)
+  )
+
+  data.frame(
+    Position  = class_name,
+    TP        = as.integer(TP),
+    FP        = as.integer(FP),
+    FN        = as.integer(FN),
+    TN        = as.integer(TN),
+    Precision = round(precision, 4),
+    Recall    = round(recall, 4),
+    F1_Score  = round(f1, 4)
+  )
+})
+
+# Combine all class results into one table
+metrics_df <- do.call(rbind, metrics_list)
+rownames(metrics_df) <- NULL
+
+# Print detailed per-class results
+cat("============================================================\n")
+cat("          PER-CLASS EVALUATION METRICS                     \n")
+cat("============================================================\n\n")
+
+cat(sprintf("%-10s %6s %6s %6s %6s %10s %8s %10s\n",
+            "Position", "TP", "FP", "FN", "TN",
+            "Precision", "Recall", "F1-Score"))
+cat(strrep("-", 66), "\n")
+
+for (i in 1:nrow(metrics_df)) {
+  cat(sprintf("%-10s %6d %6d %6d %6d %10.4f %8.4f %10.4f\n",
+              metrics_df$Position[i],
+              metrics_df$TP[i],
+              metrics_df$FP[i],
+              metrics_df$FN[i],
+              metrics_df$TN[i],
+              metrics_df$Precision[i],
+              metrics_df$Recall[i],
+              metrics_df$F1_Score[i]))
+}
+
+cat(strrep("-", 66), "\n")
+
+# Compute macro averages (equal weight to all classes)
+macro_precision <- round(mean(metrics_df$Precision), 4)
+macro_recall    <- round(mean(metrics_df$Recall), 4)
+macro_f1        <- round(mean(metrics_df$F1_Score), 4)
+
+cat(sprintf("\n%-20s : %.4f  (%.1f%%)\n", "Macro Avg Precision", macro_precision, macro_precision * 100))
+cat(sprintf("%-20s : %.4f  (%.1f%%)\n", "Macro Avg Recall",    macro_recall,    macro_recall * 100))
+cat(sprintf("%-20s : %.4f  (%.1f%%)\n", "Macro Avg F1-Score",  macro_f1,        macro_f1 * 100))
+
+```
+
+> **Interpretation:**
+> - **GK (Goalkeeper):** Goalkeepers may still be easier to classify because their general match statistics are usually very different from outfield players. However, `Save.Percentage` and `Clean.Sheets` were removed before modeling because they were highly missing and goalkeeper-specific. Therefore, the model's goalkeeper predictions are based only on the remaining general player statistics.
+> - **DF (Defender):** High in Tackles per 90 and Interceptions per 90. The model identifies them well, though some overlap exists with Midfielders who also defend.
+> - **MF (Midfielder):** The most difficult position to classify because Midfielders share both attacking traits with Forwards and defensive traits with Defenders. Some misclassification between MF and DF or MF and FW is expected and reflects the natural overlap of roles in football.
+> - **FW (Forward):** Distinguished by high Goals Scored, Assists Provided, and Dribbles per 90. The model performs well for this class due to these strong distinguishing signals.
+> - The **Macro F1-Score of `r macro_f1`** treats all four classes equally and confirms solid overall performance across all positions.
+
+---
+
+## E.4 — Metrics Summary Table
+
+```{r e4-metrics-summary-table}
+
+# ============================================================
+# E.4 METRICS SUMMARY TABLE
+# ============================================================
+# A clean, formatted summary table showing all three metrics
+# side by side for each position class plus macro averages.
+# This is the standard presentation format for classification
+# results in academic and professional reports.
+# ============================================================
+
+# Format metrics as percentages for readability
+summary_table <- data.frame(
+  Position  = metrics_df$Position,
+  Precision = paste0(round(metrics_df$Precision * 100, 1), "%"),
+  Recall    = paste0(round(metrics_df$Recall * 100, 1), "%"),
+  F1_Score  = paste0(round(metrics_df$F1_Score * 100, 1), "%")
+)
+
+# Add a separator row then macro averages at the bottom
+macro_row <- data.frame(
+  Position  = "--- Macro Average ---",
+  Precision = paste0(round(macro_precision * 100, 1), "%"),
+  Recall    = paste0(round(macro_recall * 100, 1), "%"),
+  F1_Score  = paste0(round(macro_f1 * 100, 1), "%")
+)
+
+# Add overall accuracy as a final row
+accuracy_row <- data.frame(
+  Position  = "Overall Accuracy",
+  Precision = paste0(round(overall_accuracy * 100, 2), "%"),
+  Recall    = "-",
+  F1_Score  = "-"
+)
+
+summary_table <- rbind(summary_table, macro_row, accuracy_row)
+
+cat("Classification Metrics Summary Table\n")
+cat(strrep("=", 55), "\n")
+print(summary_table, row.names = FALSE)
+cat(strrep("=", 55), "\n")
+
+```
+
+> **Interpretation:** The summary table provides a compact, side-by-side comparison of all evaluation metrics for each player position class. The Macro Average row combines all four classes with equal weight — this is the most fair overall performance measure for a multi-class problem. The Overall Accuracy of **`r round(overall_accuracy * 100, 2)`%** is consistent with the macro-level F1 score, confirming that the model is balanced and not simply exploiting the majority class.
+
+---
+
+## E.5 — Metrics Visualisation (Grouped Bar Chart)
+
+```{r e5-metrics-bar-chart}
+
+# ============================================================
+# E.5 METRICS VISUALISATION — GROUPED BAR CHART
+# ============================================================
+# A grouped bar chart places Precision, Recall, and F1-Score
+# side by side for each player position class.
+# This makes it easy to visually compare:
+#   - How each metric differs per class
+#   - Which positions the model handles best
+#   - Where Precision and Recall diverge (class imbalance effects)
+# ============================================================
+
+# Reshape metrics to long format for ggplot
+metrics_long <- metrics_df %>%
+  select(Position, Precision, Recall, F1_Score) %>%
+  pivot_longer(
+    cols      = c(Precision, Recall, F1_Score),
+    names_to  = "Metric",
+    values_to = "Value"
+  ) %>%
+  mutate(Metric = factor(Metric,
+                          levels = c("Precision", "Recall", "F1_Score"),
+                          labels = c("Precision", "Recall", "F1-Score")))
+
+ggplot(metrics_long, aes(x = Position, y = Value, fill = Metric)) +
+  geom_bar(stat = "identity", position = "dodge", width = 0.7) +
+  geom_text(
+    aes(label = paste0(round(Value * 100, 1), "%")),
+    position = position_dodge(width = 0.7),
+    vjust    = -0.4,
+    size     = 3.2,
+    fontface = "bold"
+  ) +
+  scale_fill_manual(values = c(
+    "Precision" = "#2166AC",   # Blue
+    "Recall"    = "#1B7837",   # Green
+    "F1-Score"  = "#D6604D"    # Red-orange
+  )) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1.12),
+    breaks = seq(0, 1, 0.2)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    legend.position   = "top",
+    legend.title      = element_blank(),
+    panel.grid.minor  = element_blank(),
+    axis.text         = element_text(size = 11),
+    plot.title        = element_text(face = "bold", size = 13),
+    plot.subtitle     = element_text(size = 10, color = "gray40")
+  ) +
+  labs(
+    title    = "Classification Metrics by Player Position",
+    subtitle = "Precision, Recall and F1-Score for each of the four position classes",
+    x        = "Player Position",
+    y        = "Score"
+  )
+
+```
+
+> **Interpretation:** The grouped bar chart makes differences between positions immediately visible. Positions where all three bars are tall and nearly equal in height indicate that the model is **consistent and reliable** for that class — Precision and Recall are both high, so the model neither over-predicts nor under-predicts that position. Positions where bars diverge suggest the model finds that class harder to separate from others. Any large gap between Precision and Recall indicates a trade-off — the model is either being too cautious (high Precision, lower Recall) or too aggressive (high Recall, lower Precision) when assigning that position label.
+
+---
+
+## E.6 — Accuracy vs Baseline Comparison
+
+```{r e6-baseline-comparison}
+
+# ============================================================
+# E.6 ACCURACY VS BASELINE COMPARISON
+# ============================================================
+# A baseline model always predicts the most frequent class
+# from the training data.
+#
+# The baseline is then evaluated on the test data, just like
+# the Random Forest model. This makes the comparison fair.
+#
+# If the Random Forest accuracy is close to the baseline, the
+# model has not learned much beyond a simple majority-class guess.
+# ============================================================
+
+# Find the majority class from the training data
+class_freq     <- table(final_train$Position)
+majority_class <- names(which.max(class_freq))
+
+# Create baseline predictions for the test set
+baseline_predictions <- factor(
+  rep(majority_class, nrow(final_test)),
+  levels = levels(final_test$Position)
+)
+
+# Calculate baseline accuracy on the test set
+baseline_accuracy <- mean(baseline_predictions == final_test$Position)
+
+# Improvement over baseline
+improvement_pts <- (overall_accuracy - baseline_accuracy) * 100
+
+cat("============================================================\n")
+cat("           ACCURACY VS BASELINE COMPARISON                 \n")
+cat("============================================================\n")
+cat(sprintf("Majority Class from Training Data : %s\n", majority_class))
+cat(sprintf("Baseline evaluated on Test Set    : %d players\n", nrow(final_test)))
+cat(sprintf("Baseline Accuracy                 : %.2f%%\n", baseline_accuracy * 100))
+cat(sprintf("Random Forest Accuracy            : %.2f%%\n", overall_accuracy * 100))
+cat(sprintf("Improvement over Baseline         : +%.2f percentage points\n", improvement_pts))
+cat("============================================================\n")
+
+# Visualise comparison with a bar chart
+
+baseline_label <- paste0("Baseline\n(Always predict ", majority_class, ")")
+
+baseline_df <- data.frame(
+  Model = factor(
+    c(baseline_label, "Random Forest"),
+    levels = c(baseline_label, "Random Forest")
+  ),
+  Accuracy = c(baseline_accuracy, overall_accuracy),
+  Label = c(
+    paste0(round(baseline_accuracy * 100, 1), "%"),
+    paste0(round(overall_accuracy * 100, 1), "%")
+  )
+)
+
+# Create named colors safely
+model_colors <- c("#BBBBBB", "#2166AC")
+names(model_colors) <- c(baseline_label, "Random Forest")
+
+ggplot(baseline_df, aes(x = Model, y = Accuracy, fill = Model)) +
+  geom_bar(stat = "identity", width = 0.45, show.legend = FALSE) +
+  geom_text(aes(label = Label), vjust = -0.5, size = 5.5, fontface = "bold") +
+  annotate(
+    "segment",
+    x = 1, xend = 2,
+    y = baseline_accuracy + 0.01,
+    yend = overall_accuracy - 0.01,
+    arrow = arrow(length = unit(0.3, "cm")),
+    color = "gray40", linetype = "dashed"
+  ) +
+  annotate(
+    "text",
+    x = 1.5, y = (baseline_accuracy + overall_accuracy) / 2 + 0.04,
+    label = paste0("+", round(improvement_pts, 1), " pp"),
+    size = 4, color = "gray30", fontface = "italic"
+  ) +
+  scale_fill_manual(values = model_colors) +
+  scale_y_continuous(
+    labels = scales::percent_format(accuracy = 1),
+    limits = c(0, 1.15)
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(
+    panel.grid.minor = element_blank(),
+    axis.text        = element_text(size = 11),
+    plot.title       = element_text(face = "bold", size = 13),
+    plot.subtitle    = element_text(size = 10, color = "gray40")
+  ) +
+  labs(
+    title    = "Random Forest Accuracy vs Naive Baseline",
+    subtitle = paste0("Model outperforms the majority-class baseline by ",
+                      round(improvement_pts, 1), " percentage points"),
+    x        = "",
+    y        = "Accuracy"
+  )
+
+```
+
+> **Interpretation:** A naive baseline that always predicts the most common position — Defender (DF) — achieves only **`r round(baseline_accuracy * 100, 2)`%** accuracy, since Defenders make up the largest share of the squad. The Random Forest model achieves **`r round(overall_accuracy * 100, 2)`%**, an improvement of **`r round(improvement_pts, 2)` percentage points**. This confirms that the model has genuinely learned the statistical patterns that separate each player position rather than simply defaulting to a majority guess.
+
+---
+
+## E.7 — Final Summary & Conclusions
+
+```{r e7-final-summary}
+
+# ============================================================
+# E.7 FINAL SUMMARY & CONCLUSIONS
+# ============================================================
+# A structured summary of the complete data science pipeline
+# and all key results from evaluation.
+# ============================================================
+
+cat("============================================================\n")
+cat("    FINAL SUMMARY — FIFA WC 2022 CLASSIFICATION PROJECT    \n")
+cat("============================================================\n\n")
+
+cat("Project Details\n")
+cat("------------------------------------------------------------\n")
+cat(sprintf("  %-22s : %s\n", "Dataset",         "FIFA World Cup 2022 Players Stats"))
+cat(sprintf("  %-22s : %s\n", "Rows",             "814 players from 32 nations"))
+cat(sprintf("  %-22s : %s\n", "Task",             "Multi-Class Classification"))
+cat(sprintf("  %-22s : %s\n", "Target Variable",  "Position (DF, MF, FW, GK)"))
+cat(sprintf("  %-22s : %s\n", "Model",            "Random Forest (ntree = 500)"))
+cat(sprintf("  %-22s : %s\n", "Train / Test",     "80% / 20% stratified split"))
+cat("\n")
+
+cat("Final Evaluation Results\n")
+cat("------------------------------------------------------------\n")
+cat(sprintf("  %-22s : %.2f%%\n", "Overall Accuracy",    overall_accuracy * 100))
+cat(sprintf("  %-22s : %.2f%%\n", "Macro Avg Precision", macro_precision * 100))
+cat(sprintf("  %-22s : %.2f%%\n", "Macro Avg Recall",    macro_recall * 100))
+cat(sprintf("  %-22s : %.2f%%\n", "Macro Avg F1-Score",  macro_f1 * 100))
+cat(sprintf("  %-22s : +%.2f pp above baseline\n", "Improvement", improvement_pts))
+cat("\n")
+
+cat("Key Findings\n")
+cat("------------------------------------------------------------\n")
+cat("  1. Player position can be predicted with high accuracy\n")
+cat("     from match statistics alone — no name or club needed.\n\n")
+cat("  2. Goalkeepers (GK) may still be easier to classify because\n")
+cat("     their general match statistics differ from outfield players.\n")
+cat("     However, Save Percentage and Clean Sheets were removed\n")
+cat("     before modeling due to very high missingness.\n\n")
+cat("  3. Midfielders (MF) are the hardest position to classify\n")
+cat("     because they share both attacking and defensive traits\n")
+cat("     with Forwards and Defenders respectively.\n\n")
+cat("  4. Feature engineering (Goal_Assist_Total, Defensive_Total,\n")
+cat("     Attack_Defense_Ratio) added meaningful signal and helped\n")
+cat("     the model separate position classes more effectively.\n\n")
+cat("  5. The model outperforms a naive baseline by\n")
+cat(sprintf("     %.2f percentage points, confirming genuine\n", improvement_pts))
+cat("     statistical learning from the data.\n")
+cat("------------------------------------------------------------\n")
+
+```
+
+> **Final Interpretation:** This project successfully demonstrated the complete data science lifecycle applied to the FIFA World Cup 2022 Players Statistics dataset. Starting from automated data collection, through thorough exploratory data analysis and systematic preprocessing — including missing value imputation, IQR capping, log transformation, feature engineering, and standardization — a Random Forest classifier was trained and rigorously evaluated using Accuracy, Precision, Recall, and F1-Score for each of the four position classes.
+>
+> The model achieves strong, balanced performance across all positions. Goalkeepers are identified almost perfectly due to their unique statistical fingerprint. Defenders and Midfielders present the greatest classification challenge, reflecting genuine overlap in their real-world on-pitch responsibilities. The results confirm that **football player positions are statistically separable using match performance metrics alone**, a finding with direct practical value in automated scouting systems, squad analytics platforms, and sports data science applications.
+
+---
+
+*End of Report | FIFA World Cup 2022 — Player Position Classification*
+*Author: Murshed Ahmed | Mst. Sabrina Sultana Hasi | Samiul Islam | Argha Ghosh | set.seed(42) used throughout for full reproducibility*
